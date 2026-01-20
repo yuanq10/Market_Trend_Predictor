@@ -3,6 +3,7 @@ from src.indicators import *
 from src.plotters import *
 from src.predictors import predictor
 from src.simulator import simulator
+from src.analyzers import *
 
 def main(symbol):
     analysis_start_date = "2025-01-01"
@@ -18,9 +19,11 @@ def main(symbol):
     boll_plotter(symbol, close, boll_mid, boll_ub, boll_lb)
     cci_plotter(symbol, cci)
 
-    signal = predictor(data, histogram, cci, k, d, j, boll_mid, boll_lb, boll_ub)
+    signal = predictor(data, macd, signal, histogram, cci, k, d, j, boll_mid, boll_lb, boll_ub)
     print(signal.to_string())
 
     simulation_result = simulator(close, signal)
     print(simulation_result.to_string())
+    #macd_threshold_analyzer(close, macd, histogram)
+    #cci_threshold_analyzer(close, cci)
     return

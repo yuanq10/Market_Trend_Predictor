@@ -1,9 +1,9 @@
 import pandas as pd
-def predictor(data, histogram, cci, k, d, j, boll_mid, boll_lb, boll_ub):
+def predictor(data, macd, signal, histogram, cci, k, d, j, boll_mid, boll_lb, boll_ub):
 
     # MACD conditions
-    macd_buy_zone = (-0.2, 1)
-    macd_sell_threshold = 0.2
+    macd_buy_zone = (-1, 0.6)
+    macd_sell_threshold = 0.18
     """
     Binary BUY / SELL predictors using 2-day MACD histogram trend
 
@@ -38,7 +38,8 @@ def predictor(data, histogram, cci, k, d, j, boll_mid, boll_lb, boll_ub):
     macd_sell_signal = (
         (h_t1 > h_t) &
         (h_t1 > 0) &
-        (h_t < macd_sell_threshold)
+        (h_t < macd_sell_threshold) &
+        (macd < 5)
     ).astype(int)
 
     # CCI Conditions
@@ -62,8 +63,8 @@ def predictor(data, histogram, cci, k, d, j, boll_mid, boll_lb, boll_ub):
         - buy_signal
         - sell_signal
     """
-    cci_buy_level = -80
-    cci_sell_level = 50
+    cci_buy_level = -168
+    cci_sell_level = 168
 
     cci_prev = cci.shift(1)
 
