@@ -2,15 +2,39 @@ import yfinance as yf
 import pandas as pd
 
 
-def fetch_stock_data(ticker: str, period: str = "3mo", interval: str = "1d") -> pd.DataFrame:
-    """Download OHLCV data for a ticker. Returns a DataFrame."""
-    df = yf.download(ticker, period=period, interval=interval, auto_adjust=True, progress=False)
+def fetch_stock_data(ticker: str, period: str = "3mo", interval: str = "1d",
+                     force: bool = False) -> pd.DataFrame:
+    """
+    Return OHLCV data for ticker.
+
+    For standard daily requests (interval='1d'), the result is cached in
+    SQLite (data/cache.db).  A cached result is returned as-is when the
+    last fetch occurred on or after the most recent trade date, unless
+    force=True is passed.
+    """
+    from storage.cache_manager import (
+        init_db, is_cache_fresh, load_price_history, save_price_history
+    )
+    init_db()
+
+    if not force and interval == "1d":
+        if is_cache_fresh(ticker):
+            cached = load_price_history(ticker)
+            if cached is not None and not cached.empty:
+                return cached
+
+    df = yf.download(ticker, period=period, interval=interval,
+                     auto_adjust=True, progress=False)
     if df.empty:
         raise ValueError(f"No data returned for ticker '{ticker}'")
-    # Flatten multi-level columns if present
+
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     df.index = pd.to_datetime(df.index)
+
+    if interval == "1d":
+        save_price_history(ticker, df)
+
     return df
 
 

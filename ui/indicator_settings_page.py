@@ -22,25 +22,18 @@ except Exception:
 # ── Constants ─────────────────────────────────────────────────────────────────
 INDICATOR_TYPES = ["CCI", "MACD", "KDJ"]
 
-THRESHOLD_FIELDS = {
-    "CCI": [
-        ("buy_threshold",  "Buy threshold (lower bound, e.g. -100)"),
-        ("sell_threshold", "Sell threshold (upper bound, e.g. 100)"),
-    ],
-    "MACD": [
-        ("buy_threshold",  "Upper bound — alert when histogram < this (e.g. 0.5)"),
-        ("sell_threshold", "Lower bound — alert when histogram > this (e.g. -0.5)"),
-    ],
-    "KDJ": [
-        ("buy_threshold",  "Oversold threshold for J (e.g. 20) — alert when J < this"),
-        ("sell_threshold", "Overbought threshold for J (e.g. 80) — alert when J > this"),
-    ],
+# Maps indicator type → output variable names (for multi-line indicators).
+# Single-output indicators are handled dynamically via _get_outputs().
+INDICATOR_OUTPUTS = {
+    "CCI":  ["CCI"],
+    "MACD": ["MACD", "Signal", "Histogram"],
+    "KDJ":  ["K", "D", "J"],
 }
 
-GENERIC_THRESHOLD_FIELDS = [
-    ("buy_threshold",  "Buy threshold (alert when value < this)"),
-    ("sell_threshold", "Sell threshold (alert when value > this)"),
-]
+
+def _get_outputs(ind_type: str) -> list[str]:
+    return INDICATOR_OUTPUTS.get(ind_type.upper(), [ind_type.upper()])
+
 
 CALC_PARAMS = {
     "CCI":  [("period", "Period", 20)],
@@ -50,12 +43,9 @@ CALC_PARAMS = {
 
 INDICATOR_DEFAULTS = {
     # ── Built-in (custom calculated) ──────────────────────────────────────────
-    "CCI":  {"type": "CCI",  "enabled": True, "period": 20,
-             "buy_threshold": -100, "sell_threshold": 100},
-    "MACD": {"type": "MACD", "enabled": True, "fast": 12, "slow": 26, "signal": 9,
-             "buy_threshold": 0.5, "sell_threshold": -0.5},
-    "KDJ":  {"type": "KDJ",  "enabled": True, "period": 9, "k_smooth": 3, "d_smooth": 3,
-             "buy_threshold": 20, "sell_threshold": 80},
+    "CCI":  {"type": "CCI",  "enabled": True, "period": 20, "thresholds": {}},
+    "MACD": {"type": "MACD", "enabled": True, "fast": 12, "slow": 26, "signal": 9, "thresholds": {}},
+    "KDJ":  {"type": "KDJ",  "enabled": True, "period": 9, "k_smooth": 3, "d_smooth": 3, "thresholds": {}},
 
     # ── Momentum Indicators ───────────────────────────────────────────────────
     # ADX: 0–100; >25 = strong trend (no direction), >50 = very strong
@@ -261,9 +251,7 @@ INDICATOR_DEFAULTS = {
 # Params excluded from the "add indicator" form — not calc parameters
 def _sorted_indicator_types() -> list[str]:
     settings = load_settings()
-    saved = [i["type"] for i in settings.get("indicators", [])]
-    all_types = sorted(set(INDICATOR_TYPES) | set(saved))
-    return all_types
+    return sorted(i["type"] for i in settings.get("indicators", []))
 
 
 def _get_ta_calc_params(name: str) -> list[tuple[str, int | float]]:
@@ -336,21 +324,114 @@ class _SuggestionPopup:
         self._win = None
 
 
+# ── Threshold editor ──────────────────────────────────────────────────────────
+class _ThresholdEditor:
+    """Per-variable threshold list editor. Renders into the given parent frame."""
+
+    def __init__(self, parent: ctk.CTkFrame, ind_type: str, existing: dict):
+        self._data: dict[str, list[float]] = {}
+        self._val_frames: dict[str, ctk.CTkFrame] = {}
+        self._add_entries: dict[str, ctk.CTkEntry] = {}
+        outputs = _get_outputs(ind_type)
+        for var in outputs:
+            self._data[var] = list(existing.get(var, []))
+        self._build(parent, outputs)
+
+    def get_data(self) -> dict[str, list[float]]:
+        return {k: list(v) for k, v in self._data.items()}
+
+    def _build(self, parent: ctk.CTkFrame, outputs: list[str]):
+        for var in outputs:
+            grp = ctk.CTkFrame(parent, fg_color="transparent")
+            grp.pack(fill="x", pady=(6, 0))
+
+            ctk.CTkLabel(
+                grp, text=f"{var} Alert Thresholds", anchor="w",
+                text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=11, weight="bold")
+            ).pack(anchor="w", pady=(0, 3))
+
+            vals_frame = ctk.CTkFrame(grp, fg_color=T.BG, corner_radius=6)
+            vals_frame.pack(fill="x", pady=(0, 4))
+            self._val_frames[var] = vals_frame
+            self._render_values(var)
+
+            add_row = ctk.CTkFrame(grp, fg_color="transparent")
+            add_row.pack(fill="x")
+            entry = ctk.CTkEntry(
+                add_row, height=28, corner_radius=6,
+                fg_color=T.BG, border_color=T.BORDER, text_color=T.TEXT,
+                placeholder_text="value", placeholder_text_color=T.TEXT_MUTED
+            )
+            entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+            self._add_entries[var] = entry
+            entry.bind("<Return>", lambda e, v=var: self._on_add(v))
+            ctk.CTkButton(
+                add_row, text="+ Add", width=56, height=28, corner_radius=6,
+                fg_color=T.ACCENT, hover_color="#79b8ff", text_color="#000000",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                command=lambda v=var: self._on_add(v)
+            ).pack(side="left")
+
+    def _render_values(self, var: str):
+        frame = self._val_frames[var]
+        for w in frame.winfo_children():
+            w.destroy()
+        if not self._data[var]:
+            ctk.CTkLabel(
+                frame, text="No thresholds set", anchor="w",
+                text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=10)
+            ).pack(anchor="w", padx=8, pady=4)
+        else:
+            for i, val in enumerate(self._data[var]):
+                row = ctk.CTkFrame(frame, fg_color="transparent")
+                row.pack(fill="x", padx=6, pady=2)
+                ctk.CTkLabel(
+                    row, text=str(val), anchor="w",
+                    text_color=T.TEXT, font=ctk.CTkFont(size=11)
+                ).pack(side="left", padx=4)
+                ctk.CTkButton(
+                    row, text="×", width=20, height=20, corner_radius=4,
+                    fg_color="transparent", hover_color=T.DANGER,
+                    text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=10),
+                    command=lambda v=var, idx=i: self._on_remove(v, idx)
+                ).pack(side="right")
+
+    def _on_add(self, var: str):
+        entry = self._add_entries[var]
+        try:
+            val = float(entry.get().strip())
+        except ValueError:
+            return
+        self._data[var].append(val)
+        entry.delete(0, "end")
+        self._render_values(var)
+
+    def _on_remove(self, var: str, idx: int):
+        if 0 <= idx < len(self._data[var]):
+            self._data[var].pop(idx)
+        self._render_values(var)
+
+
 # ── Main page ─────────────────────────────────────────────────────────────────
 class IndicatorSettingsPage(ctk.CTkFrame):
     def __init__(self, parent, app):
         super().__init__(parent, corner_radius=0, fg_color="transparent")
         self._app = app
-        self._threshold_entries: dict = {}
+        self._threshold_editor: _ThresholdEditor | None = None
+        self._add_threshold_editor: _ThresholdEditor | None = None
         self._calc_entries: dict = {}
         self._calc_param_types: dict = {}  # key -> type (int or float)
         self._add_param_entries: dict = {}
-        self._current_ind = "CCI"
+        self._current_ind = None
         self._selected_new_ind: str | None = None
         self._popup: _SuggestionPopup | None = None
         self._updating_name = False  # guard: suppress trace while setting entry text
         self._build_ui()
-        self._load_indicator("CCI")
+        available = _sorted_indicator_types()
+        if available:
+            self._load_indicator(available[0])
+        else:
+            self._clear_config_panel()
         self.bind("<Destroy>", self._on_destroy)
 
     def _on_destroy(self, event):
@@ -401,7 +482,7 @@ class IndicatorSettingsPage(ctk.CTkFrame):
     def _build_active_list(self, panel):
         ctk.CTkLabel(
             panel, text="Active Indicators",
-            font=ctk.CTkFont(size=13, weight="bold"), text_color=T.TEXT
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT
         ).pack(pady=(14, 8), padx=12, anchor="w")
 
         self._ind_list_frame = ctk.CTkScrollableFrame(
@@ -415,7 +496,7 @@ class IndicatorSettingsPage(ctk.CTkFrame):
     def _build_add_panel(self, panel):
         ctk.CTkLabel(
             panel, text="Add Indicator",
-            font=ctk.CTkFont(size=13, weight="bold"), text_color=T.TEXT
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT
         ).pack(pady=(14, 8), padx=14, anchor="w")
 
         ctk.CTkFrame(panel, height=1, fg_color=T.BORDER).pack(fill="x", padx=14)
@@ -527,28 +608,17 @@ class IndicatorSettingsPage(ctk.CTkFrame):
         # ── Alert thresholds ──────────────────────────────────────────
         ctk.CTkFrame(self._add_fields_frame, height=1, fg_color=T.BORDER).pack(fill="x", pady=(12, 0))
         ctk.CTkLabel(
-            self._add_fields_frame, text="Alert Thresholds", anchor="w",
-            text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=11, weight="bold")
-        ).pack(anchor="w", pady=(8, 4))
-
-        for key, label in [("buy_threshold", "Buy threshold (alert when value < this)"),
-                            ("sell_threshold", "Sell threshold (alert when value > this)")]:
-            row = ctk.CTkFrame(self._add_fields_frame, fg_color="transparent")
-            row.pack(fill="x", pady=3)
-            ctk.CTkLabel(
-                row, text=label, anchor="w",
-                text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=11)
-            ).pack(anchor="w", pady=(0, 2))
-            entry = ctk.CTkEntry(
-                row, height=32, corner_radius=8,
-                fg_color=T.BG, border_color=T.BORDER, text_color=T.TEXT,
-                placeholder_text="Optional", placeholder_text_color=T.TEXT_MUTED
-            )
-            preset = defaults.get(key)
-            if preset is not None:
-                entry.insert(0, str(preset))
-            entry.pack(fill="x")
-            self._add_param_entries[key] = entry
+            self._add_fields_frame, text="Alert Thresholds",
+            anchor="w", text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=11, weight="bold")
+        ).pack(anchor="w", pady=(8, 2))
+        ctk.CTkLabel(
+            self._add_fields_frame,
+            text="Alerts fire when a value crosses any threshold.",
+            anchor="w", text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=10)
+        ).pack(anchor="w", pady=(0, 4))
+        self._add_threshold_editor = _ThresholdEditor(
+            self._add_fields_frame, name, defaults.get("thresholds", {})
+        )
 
         # ── Add button ────────────────────────────────────────────────
         ctk.CTkButton(
@@ -577,13 +647,13 @@ class IndicatorSettingsPage(ctk.CTkFrame):
         try:
             for key, entry in self._add_param_entries.items():
                 val = entry.get().strip()
-                if key in ("buy_threshold", "sell_threshold"):
-                    new_ind[key] = float(val) if val else None
-                else:
-                    new_ind[key] = int(val) if val else 14
+                new_ind[key] = int(val) if val else 14
         except ValueError:
             self._lbl_add_msg.configure(text="Invalid number in fields.", text_color=T.DANGER)
             return
+
+        if self._add_threshold_editor:
+            new_ind["thresholds"] = self._add_threshold_editor.get_data()
 
         indicators.append(new_ind)
         settings["indicators"] = indicators
@@ -659,17 +729,6 @@ class IndicatorSettingsPage(ctk.CTkFrame):
         self._threshold_frame = ctk.CTkFrame(thresh_col, fg_color="transparent")
         self._threshold_frame.pack(fill="both", expand=True)
 
-        self._macd_note = ctk.CTkLabel(
-            self._threshold_frame,
-            text="Note: Crossover alerts also fire\nregardless of threshold.",
-            text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=11), justify="left"
-        )
-        self._kdj_note = ctk.CTkLabel(
-            self._threshold_frame,
-            text="Note: K/D crossover alerts also\nfire automatically.",
-            text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=11), justify="left"
-        )
-
         # ── Bottom bar ────────────────────────────────────────────────
         self._lbl_msg = ctk.CTkLabel(panel, text="", font=ctk.CTkFont(size=11))
         self._lbl_msg.pack(padx=16, pady=(0, 4), anchor="w", side="bottom")
@@ -743,44 +802,33 @@ class IndicatorSettingsPage(ctk.CTkFrame):
         else:
             ctk.CTkLabel(
                 self._calc_frame, text="No parameters", anchor="w",
-                text_color=T.TEXT_DIM, font=ctk.CTkFont(size=11)
+                text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=11)
             ).pack(anchor="w")
 
         # ── Alert thresholds (right column) ───────────────────────────
         for w in self._threshold_frame.winfo_children():
             w.destroy()
-        self._threshold_entries = {}
 
-        fields = THRESHOLD_FIELDS.get(ind_type, GENERIC_THRESHOLD_FIELDS)
-        for key, label in fields:
-            row = ctk.CTkFrame(self._threshold_frame, fg_color="transparent")
-            row.pack(fill="x", pady=5)
-            ctk.CTkLabel(
-                row, text=label, anchor="w",
-                text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=11)
-            ).pack(anchor="w", pady=(0, 3))
-            entry = ctk.CTkEntry(
-                row, height=34, corner_radius=8,
-                fg_color=T.BG, border_color=T.BORDER,
-                text_color=T.TEXT, placeholder_text_color=T.TEXT_MUTED,
-                placeholder_text="None"
-            )
-            val = ind_cfg.get(key)
-            if val is not None:
-                entry.insert(0, str(val))
-            entry.pack(fill="x")
-            self._threshold_entries[key] = entry
+        ctk.CTkLabel(
+            self._threshold_frame,
+            text="Alerts fire when a value crosses any threshold.",
+            anchor="w", text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=10)
+        ).pack(anchor="w", pady=(0, 4))
 
-        if ind_type == "MACD":
-            self._macd_note.pack(anchor="w", pady=(10, 0))
-        if ind_type == "KDJ":
-            self._kdj_note.pack(anchor="w", pady=(10, 0))
+        existing_thresholds = ind_cfg.get("thresholds", {})
+        self._threshold_editor = _ThresholdEditor(
+            self._threshold_frame, ind_type, existing_thresholds
+        )
 
     # ------------------------------------------------------------------
     # Active indicators list
     # ------------------------------------------------------------------
     def on_show(self):
         self._refresh_indicator_list()
+
+    def on_hide(self):
+        if getattr(self, "_popup", None):
+            self._popup.hide()
 
     def _refresh_indicator_list(self):
         for w in self._ind_list_frame.winfo_children():
@@ -814,13 +862,29 @@ class IndicatorSettingsPage(ctk.CTkFrame):
         settings = load_settings()
         settings["indicators"] = [i for i in settings.get("indicators", []) if i["type"] != ind_type]
         save_settings(settings)
+        remaining = _sorted_indicator_types()
         self._update_dropdown()
-        # If the removed indicator is currently displayed, switch to first available
-        if self._current_ind == ind_type:
-            remaining = _sorted_indicator_types()
-            if remaining:
-                self._load_indicator(remaining[0])
+        if not remaining:
+            self._clear_config_panel()
+        elif self._current_ind == ind_type:
+            self._load_indicator(remaining[0])
         self._refresh_indicator_list()
+
+    def _clear_config_panel(self):
+        self._current_ind = None
+        self._dropdown.configure(values=["—"], state="disabled")
+        self._dropdown.set("—")
+        for w in self._calc_frame.winfo_children():
+            w.destroy()
+        self._calc_entries = {}
+        self._calc_param_types = {}
+        ctk.CTkLabel(
+            self._calc_frame, text="No indicators configured.", anchor="w",
+            text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=11)
+        ).pack(anchor="w")
+        for w in self._threshold_frame.winfo_children():
+            w.destroy()
+        self._threshold_editor = None
 
     def _toggle_indicator(self, ind_type: str, enabled: bool):
         settings = load_settings()
@@ -830,13 +894,20 @@ class IndicatorSettingsPage(ctk.CTkFrame):
         save_settings(settings)
 
     def _update_dropdown(self):
-        self._dropdown.configure(values=_sorted_indicator_types())
+        types = _sorted_indicator_types()
+        if types:
+            self._dropdown.configure(values=types, state="normal")
+        else:
+            self._dropdown.configure(values=["—"], state="disabled")
+            self._dropdown.set("—")
 
     # ------------------------------------------------------------------
     # Save (calc params + thresholds together)
     # ------------------------------------------------------------------
     def _on_save(self):
         ind_type = self._current_ind
+        if not ind_type:
+            return
         settings = load_settings()
         indicators = settings.get("indicators", [])
         existing = next((i for i in indicators if i["type"] == ind_type), None)
@@ -857,13 +928,11 @@ class IndicatorSettingsPage(ctk.CTkFrame):
             self._lbl_msg.configure(text="Invalid value in calculation parameters.", text_color=T.DANGER)
             return
 
-        try:
-            for key, entry in self._threshold_entries.items():
-                val = entry.get().strip()
-                existing[key] = float(val) if val else None
-        except ValueError:
-            self._lbl_msg.configure(text="Invalid value in threshold fields.", text_color=T.DANGER)
-            return
+        if self._threshold_editor:
+            existing["thresholds"] = self._threshold_editor.get_data()
+        # Remove legacy keys
+        for k in ("buy_threshold", "sell_threshold"):
+            existing.pop(k, None)
 
         existing["enabled"] = True
         settings["indicators"] = indicators
@@ -888,11 +957,10 @@ class IndicatorSettingsPage(ctk.CTkFrame):
             if val is not None:
                 entry.insert(0, str(val))
 
-        # Re-fill threshold entries
-        for key, entry in self._threshold_entries.items():
-            entry.delete(0, "end")
-            val = defaults.get(key)
-            if val is not None:
-                entry.insert(0, str(val))
+        # Clear all thresholds (user sets their own)
+        if self._threshold_editor:
+            for var in self._threshold_editor._data:
+                self._threshold_editor._data[var] = []
+                self._threshold_editor._render_values(var)
 
         self._lbl_msg.configure(text="Defaults restored — click Save to apply.", text_color=T.WARNING)

@@ -1,6 +1,7 @@
 import customtkinter as ctk
 from ui.home_page import HomePage
-from ui.stock_settings_page import StockSettingsPage
+from ui.stocks_page import StocksPage
+from ui.stock_settings_page import AnalysisPage
 from ui.indicator_settings_page import IndicatorSettingsPage
 import ui.theme as T
 
@@ -29,15 +30,19 @@ class App(ctk.CTk):
         nav_bar.pack(side="bottom", fill="x")
         nav_bar.pack_propagate(False)
 
-        # Even 3-column grid for nav items
-        nav_bar.grid_columnconfigure(0, weight=1)
-        nav_bar.grid_columnconfigure(1, weight=1)
-        nav_bar.grid_columnconfigure(2, weight=1)
+        # Even 4-column grid for nav items
+        for i in range(4):
+            nav_bar.grid_columnconfigure(i, weight=1)
         nav_bar.grid_rowconfigure(0, weight=1)
 
         self._nav_buttons = {}
         self._nav_indicators = {}
-        nav_items = [("Home", "home"), ("Stocks", "stocks"), ("Indicators", "indicators")]
+        nav_items = [
+            ("Home", "home"),
+            ("Analysis", "analysis"),
+            ("Stocks", "stocks"),
+            ("Indicators", "indicators"),
+        ]
         for i, (label, key) in enumerate(nav_items):
             col = ctk.CTkFrame(nav_bar, fg_color="transparent")
             col.grid(row=0, column=i, sticky="nsew")
@@ -63,14 +68,18 @@ class App(ctk.CTk):
 
         self._pages = {}
         self._pages["home"] = HomePage(self.content, self)
-        self._pages["stocks"] = StockSettingsPage(self.content, self)
+        self._pages["stocks"] = StocksPage(self.content, self)
+        self._pages["analysis"] = AnalysisPage(self.content, self)
         self._pages["indicators"] = IndicatorSettingsPage(self.content, self)
 
         self.show_page("home")
 
     def show_page(self, key: str):
-        for page in self._pages.values():
-            page.pack_forget()
+        for k, page in self._pages.items():
+            if k != key:
+                page.pack_forget()
+                if hasattr(page, "on_hide"):
+                    page.on_hide()
         self._pages[key].pack(fill="both", expand=True)
 
         for k, btn in self._nav_buttons.items():

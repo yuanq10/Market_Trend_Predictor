@@ -1,73 +1,34 @@
 {
   "alerts": {
-    "TSLA": [
-      {
-        "indicator": "MACD",
-        "signal": "sell",
-        "value": -0.0093,
-        "reason": "MACD crossed below signal line (histogram -0.0093)"
-      },
-      {
-        "indicator": "MACD",
-        "signal": "alert",
-        "value": -0.0093,
-        "reason": "MACD histogram -0.0093 within convergence range [-0.5, 0.5]"
-      },
-      {
-        "indicator": "KDJ",
-        "signal": "sell",
-        "value": 41.94,
-        "reason": "KDJ K=41.94 crossed below D=44.06 (bearish crossover)"
-      }
-    ],
-    "AAPL": [
-      {
-        "indicator": "CCI",
-        "signal": "buy",
-        "value": -103.84,
-        "reason": "CCI -103.84 below oversold threshold -100.0"
-      },
-      {
-        "indicator": "KDJ",
-        "signal": "buy",
-        "value": 6.22,
-        "reason": "KDJ J=6.22 below oversold threshold 20.0"
-      }
-    ],
-    "KO": [
-      {
-        "indicator": "KDJ",
-        "signal": "buy",
-        "value": -0.32,
-        "reason": "KDJ J=-0.32 below oversold threshold 20.0"
-      }
-    ]
+    "TSLA": [],
+    "AAPL": [],
+    "KO": []
   },
   "stats": {
     "TSLA": {
-      "close": 396.73,
-      "change_pct": -2.17,
-      "volume": 64054561,
-      "cci": -76.08,
-      "macd": -7.4559,
-      "kdj_k": 41.94
+      "close": 387.89,
+      "change_pct": -1.03,
+      "volume": 53288370,
+      "cci": 67.18,
+      "macd": -6.267,
+      "kdj_k": null
     },
     "AAPL": {
-      "close": 257.46,
-      "change_pct": -1.09,
-      "volume": 41120042,
-      "cci": -103.84,
-      "macd": -0.9265,
-      "kdj_k": 19.15
+      "close": 264.49,
+      "change_pct": -0.73,
+      "volume": 27156859,
+      "cci": 67.18,
+      "macd": -6.267,
+      "kdj_k": null
     },
     "KO": {
-      "close": 77.04,
-      "change_pct": 0.01,
-      "volume": 14495007,
-      "cci": -51.68,
-      "macd": 0.9471,
-      "kdj_k": 15.1
+      "close": 75.02,
+      "change_pct": -0.39,
+      "volume": 6474769,
+      "cci": -44.11,
+      "macd": -0.1837,
+      "kdj_k": null
     }
   },
-  "last_updated": "2026-03-09 02:52:11"
+  "last_updated": "2026-04-16 15:05:03"
 }

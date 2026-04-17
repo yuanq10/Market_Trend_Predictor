@@ -6,13 +6,14 @@ import matplotlib.pyplot as plt
 import matplotlib.dates
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from storage.settings_manager import load_settings, save_settings, load_alerts
+from storage.settings_manager import load_settings, load_alerts
 import ui.theme as T
 
-INDICATOR_STAT_KEYS = {"CCI": "CCI", "MACD": "MACD", "KDJ K": "KDJ"}
+_CHARTABLE = {"CCI": ("cci", "CCI"), "MACD": ("macd", "MACD"), "KDJ": ("kdj_k", "KDJ K")}
 
 
-class StockSettingsPage(ctk.CTkFrame):
+
+class AnalysisPage(ctk.CTkFrame):
     def __init__(self, parent, app):
         super().__init__(parent, corner_radius=0, fg_color="transparent")
         self._app = app
@@ -32,33 +33,9 @@ class StockSettingsPage(ctk.CTkFrame):
         top.pack(fill="x", padx=20, pady=(16, 0))
 
         ctk.CTkLabel(
-            top, text="Stocks",
+            top, text="Analysis",
             font=ctk.CTkFont(size=22, weight="bold"), text_color=T.TEXT
         ).pack(side="left")
-
-        search_frame = ctk.CTkFrame(top, fg_color="transparent")
-        search_frame.pack(side="right")
-
-        self._entry_ticker = ctk.CTkEntry(
-            search_frame, placeholder_text="Enter ticker (e.g. AAPL)",
-            width=220, height=36, corner_radius=18,
-            fg_color=T.CARD, border_color=T.BORDER,
-            text_color=T.TEXT, placeholder_text_color=T.TEXT_MUTED
-        )
-        self._entry_ticker.pack(side="left", padx=(0, 8))
-        self._entry_ticker.bind("<Return>", lambda _: self._on_add())
-
-        ctk.CTkButton(
-            search_frame, text="Add", width=80, height=36, corner_radius=18,
-            fg_color=T.ACCENT, hover_color="#79b8ff", text_color="#000000",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            command=self._on_add
-        ).pack(side="left")
-
-        self._lbl_msg = ctk.CTkLabel(
-            top, text="", font=ctk.CTkFont(size=11), text_color=T.TEXT_MUTED
-        )
-        self._lbl_msg.pack(side="left", padx=16)
 
         # ── Middle row ───────────────────────────────────────────────
         mid = ctk.CTkFrame(self, fg_color="transparent")
@@ -66,15 +43,15 @@ class StockSettingsPage(ctk.CTkFrame):
 
         # Right: stocks list
         right_panel = ctk.CTkFrame(
-            mid, width=160, fg_color=T.CARD,
+            mid, width=180, fg_color=T.CARD,
             corner_radius=12, border_width=1, border_color=T.BORDER
         )
         right_panel.pack(side="right", fill="y", padx=(10, 0))
         right_panel.pack_propagate(False)
 
         ctk.CTkLabel(
-            right_panel, text="My Stocks",
-            font=ctk.CTkFont(size=13, weight="bold"), text_color=T.TEXT
+            right_panel, text="Watchlist",
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT
         ).pack(pady=(14, 8), padx=12, anchor="w")
 
         self._stocks_list = ctk.CTkScrollableFrame(
@@ -101,7 +78,7 @@ class StockSettingsPage(ctk.CTkFrame):
 
         ctk.CTkLabel(
             chart_frame, text="Price Chart",
-            font=ctk.CTkFont(size=12, weight="bold"), text_color=T.TEXT
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT
         ).pack(pady=(14, 4), padx=12, anchor="w")
 
         self._chart_container = ctk.CTkFrame(chart_frame, fg_color="transparent")
@@ -116,7 +93,7 @@ class StockSettingsPage(ctk.CTkFrame):
 
         ctk.CTkLabel(
             stats_frame, text="Stats",
-            font=ctk.CTkFont(size=12, weight="bold"), text_color=T.TEXT
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT
         ).pack(pady=(14, 8), padx=12, anchor="w")
 
         self._stats_inner = ctk.CTkScrollableFrame(
@@ -135,19 +112,15 @@ class StockSettingsPage(ctk.CTkFrame):
             self._stat_labels[key] = self._make_metric_card(self._stats_inner, display)
 
         ctk.CTkLabel(
-            self._stats_inner, text="INDICATORS",
-            font=ctk.CTkFont(size=9, weight="bold"), text_color=T.TEXT_DIM
+            self._stats_inner, text="Indicators",
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT
         ).pack(anchor="w", padx=4, pady=(10, 2))
 
-        for stat_key, ind_type in INDICATOR_STAT_KEYS.items():
-            self._stat_labels[stat_key] = self._make_metric_card(
-                self._stats_inner, stat_key,
-                clickable=True,
-                click_cmd=lambda k=stat_key, t=ind_type: self._toggle_indicator_plot(k, t),
-                btn_store_key=stat_key,
-            )
+        self._ind_cards_frame = ctk.CTkFrame(self._stats_inner, fg_color="transparent")
+        self._ind_cards_frame.pack(fill="x")
 
         self._refresh_stocks_list()
+        self._refresh_indicator_cards()
 
     def _make_metric_card(self, parent, label, clickable=False, click_cmd=None, btn_store_key=None):
         card = ctk.CTkFrame(parent, fg_color=T.BG, corner_radius=8,
@@ -179,10 +152,45 @@ class StockSettingsPage(ctk.CTkFrame):
         return val_lbl
 
     # ------------------------------------------------------------------
+    # Dynamic indicator cards
+    # ------------------------------------------------------------------
+    def _refresh_indicator_cards(self):
+        for w in self._ind_cards_frame.winfo_children():
+            w.destroy()
+        for k in list(self._stat_labels.keys()):
+            if k not in ("Close", "Change % (1d)", "Volume"):
+                del self._stat_labels[k]
+        self._stat_key_btns = {}
+
+        settings = load_settings()
+        enabled_types = {i["type"] for i in settings.get("indicators", []) if i.get("enabled", True)}
+        active_chartable = [(t, sk, lbl) for t, (sk, lbl) in _CHARTABLE.items() if t in enabled_types]
+
+        if not active_chartable:
+            ctk.CTkLabel(
+                self._ind_cards_frame, text="No active indicators",
+                font=ctk.CTkFont(size=10), text_color=T.TEXT_MUTED
+            ).pack(anchor="w", padx=4, pady=4)
+            return
+
+        for ind_type, stat_key, display_label in active_chartable:
+            self._stat_labels[display_label] = self._make_metric_card(
+                self._ind_cards_frame, display_label,
+                clickable=True,
+                click_cmd=lambda k=display_label, t=ind_type: self._toggle_indicator_plot(k, t),
+                btn_store_key=display_label,
+            )
+
+    # ------------------------------------------------------------------
     # Stocks list
     # ------------------------------------------------------------------
     def on_show(self):
+        self._refresh_indicator_cards()
         self._refresh_stocks_list()
+
+    def on_hide(self):
+        if getattr(self, "_popup", None):
+            self._popup.hide()
 
     def _refresh_stocks_list(self):
         for w in self._stocks_list.winfo_children():
@@ -200,6 +208,13 @@ class StockSettingsPage(ctk.CTkFrame):
                 corner_radius=8, border_width=1, border_color=T.BORDER
             )
             item.pack(fill="x", pady=3)
+            del_btn = ctk.CTkButton(
+                item, text="✕", width=24, height=24, corner_radius=6,
+                fg_color="transparent", hover_color=T.DANGER,
+                text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=10),
+                command=lambda t=ticker: self._on_remove(t)
+            )
+            del_btn.pack(side="right", padx=(0, 6), pady=4, ipadx=0)
             btn = ctk.CTkButton(
                 item, text=ticker, anchor="w",
                 fg_color="transparent", hover_color=T.CARD,
@@ -207,39 +222,6 @@ class StockSettingsPage(ctk.CTkFrame):
                 command=lambda t=ticker: self._select_ticker(t)
             )
             btn.pack(side="left", fill="x", expand=True, padx=4, pady=4)
-            del_btn = ctk.CTkButton(
-                item, text="✕", width=28, height=28, corner_radius=14,
-                fg_color="transparent", hover_color=T.DANGER,
-                text_color=T.TEXT_MUTED, font=ctk.CTkFont(size=11),
-                command=lambda t=ticker: self._on_remove(t)
-            )
-            del_btn.pack(side="right", padx=6, pady=4)
-
-    def _on_add(self):
-        ticker = self._entry_ticker.get().strip().upper()
-        if not ticker:
-            return
-        settings = load_settings()
-        stocks = settings.get("stocks", [])
-        if ticker in stocks:
-            self._lbl_msg.configure(text=f"{ticker} already added.", text_color=T.WARNING)
-            return
-        stocks.append(ticker)
-        settings["stocks"] = stocks
-        save_settings(settings)
-        self._entry_ticker.delete(0, "end")
-        self._lbl_msg.configure(text=f"Added {ticker}.", text_color=T.SUCCESS)
-        self._refresh_stocks_list()
-
-    def _on_remove(self, ticker: str):
-        settings = load_settings()
-        stocks = settings.get("stocks", [])
-        if ticker in stocks:
-            stocks.remove(ticker)
-        settings["stocks"] = stocks
-        save_settings(settings)
-        self._lbl_msg.configure(text=f"Removed {ticker}.", text_color=T.TEXT_MUTED)
-        self._refresh_stocks_list()
 
     # ------------------------------------------------------------------
     # Ticker selection
@@ -274,9 +256,9 @@ class StockSettingsPage(ctk.CTkFrame):
         self._stat_labels["Change % (1d)"].configure(text=fmt(change, "%"), text_color=color)
         vol = info.get("volume")
         self._stat_labels["Volume"].configure(text=f"{vol:,}" if vol else "—")
-        self._stat_labels["CCI"].configure(text=fmt(stat.get("cci")))
-        self._stat_labels["MACD"].configure(text=fmt(stat.get("macd")))
-        self._stat_labels["KDJ K"].configure(text=fmt(stat.get("kdj_k")))
+        for _itype, (_sk, _lbl) in _CHARTABLE.items():
+            if _lbl in self._stat_labels:
+                self._stat_labels[_lbl].configure(text=fmt(stat.get(_sk)))
 
     def _show_error(self, msg: str):
         for w in self._chart_container.winfo_children():
@@ -364,19 +346,22 @@ class StockSettingsPage(ctk.CTkFrame):
     def _plot_indicator(self, ax, df, indicator: str, ind_cfg: dict, fg: str, bg: str):
         from core.indicators import calc_cci, calc_macd, calc_kdj
 
+        thresholds_cfg = ind_cfg.get("thresholds", {})
+
+        def _draw_thresholds(th_dict):
+            seen = set()
+            for vals in th_dict.values():
+                for v in vals:
+                    if v not in seen:
+                        ax.axhline(v, color=T.WARNING, linestyle="--", linewidth=0.8, alpha=0.7)
+                        seen.add(v)
+
         if indicator == "CCI":
             period = ind_cfg.get("period", 20)
             cci = calc_cci(df, period).dropna()
             ax.plot(cci.index, cci.values, color=T.CHART_CCI, linewidth=1.4)
-            buy_th  = ind_cfg.get("buy_threshold", -100)
-            sell_th = ind_cfg.get("sell_threshold", 100)
-            ax.axhline(buy_th,  color=T.SUCCESS, linestyle="--", linewidth=0.8, alpha=0.7)
-            ax.axhline(sell_th, color=T.DANGER,  linestyle="--", linewidth=0.8, alpha=0.7)
             ax.axhline(0, color=T.TEXT_DIM, linewidth=0.5, alpha=0.6)
-            ax.fill_between(cci.index, cci.values, buy_th,
-                            where=(cci.values < buy_th), alpha=0.2, color=T.SUCCESS, interpolate=True)
-            ax.fill_between(cci.index, cci.values, sell_th,
-                            where=(cci.values > sell_th), alpha=0.2, color=T.DANGER, interpolate=True)
+            _draw_thresholds(thresholds_cfg)
             ax.set_ylabel("CCI", color=T.TEXT_MUTED, fontsize=7)
 
         elif indicator == "MACD":
@@ -396,13 +381,8 @@ class StockSettingsPage(ctk.CTkFrame):
                 ax.bar(pos.index, pos.values, color=T.CHART_HIST_POS, alpha=0.5, width=0.8)
             if not neg.empty:
                 ax.bar(neg.index, neg.values, color=T.CHART_HIST_NEG, alpha=0.5, width=0.8)
-            buy_th  = ind_cfg.get("buy_threshold")
-            sell_th = ind_cfg.get("sell_threshold")
-            if buy_th  is not None and buy_th  != 0:
-                ax.axhline(buy_th,  color=T.SUCCESS, linestyle="--", linewidth=0.8, alpha=0.7)
-            if sell_th is not None and sell_th != 0:
-                ax.axhline(sell_th, color=T.DANGER,  linestyle="--", linewidth=0.8, alpha=0.7)
             ax.axhline(0, color=T.TEXT_DIM, linewidth=0.5, alpha=0.6)
+            _draw_thresholds(thresholds_cfg)
             ax.set_ylabel("MACD", color=T.TEXT_MUTED, fontsize=7)
             ax.legend(fontsize=6, facecolor=T.CARD, labelcolor=T.TEXT_MUTED,
                       loc="upper left", framealpha=0.8, edgecolor=T.BORDER)
@@ -418,10 +398,7 @@ class StockSettingsPage(ctk.CTkFrame):
             ax.plot(K.index, K.values, color=T.CHART_K, linewidth=1.2, label="K")
             ax.plot(D.index, D.values, color=T.CHART_D, linewidth=1.2, label="D")
             ax.plot(J.index, J.values, color=T.CHART_J, linewidth=1.2, label="J")
-            buy_th  = ind_cfg.get("buy_threshold", 20)
-            sell_th = ind_cfg.get("sell_threshold", 80)
-            ax.axhline(buy_th,  color=T.SUCCESS, linestyle="--", linewidth=0.8, alpha=0.7)
-            ax.axhline(sell_th, color=T.DANGER,  linestyle="--", linewidth=0.8, alpha=0.7)
+            _draw_thresholds(thresholds_cfg)
             ax.set_ylabel("KDJ", color=T.TEXT_MUTED, fontsize=7)
             ax.legend(fontsize=6, facecolor=T.CARD, labelcolor=T.TEXT_MUTED,
                       loc="upper left", framealpha=0.8, edgecolor=T.BORDER)

@@ -1,12 +1,24 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 datas = []
 binaries = []
-hiddenimports = ['plyer.platforms.win.notification']
-tmp_ret = collect_all('customtkinter')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+hiddenimports = [
+    'plyer.platforms.win.notification',
+    'sqlite3',
+    'yfinance',
+    'pandas',
+    'numpy',
+    'requests',
+    'storage.cache_manager',
+    'storage.settings_manager',
+]
 
+for pkg in ('customtkinter', 'yfinance'):
+    tmp = collect_all(pkg)
+    datas    += tmp[0]
+    binaries += tmp[1]
+    hiddenimports += tmp[2]
 
 a = Analysis(
     ['main.py'],
@@ -26,26 +38,20 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='StockTracker',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    upx_exclude=[],
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-)
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='StockTracker',
+    onefile=True,
 )

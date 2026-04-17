@@ -1,5 +1,9 @@
 {
-  "stocks": [],
+  "stocks": [
+    "TSLA",
+    "AAPL",
+    "KO"
+  ],
   "indicators": [
     {
       "type": "CCI",
@@ -13,7 +17,9 @@
       "enabled": true,
       "fast": 12,
       "slow": 26,
-      "signal": 9
+      "signal": 9,
+      "buy_threshold": 0.5,
+      "sell_threshold": -0.5
     },
     {
       "type": "KDJ",

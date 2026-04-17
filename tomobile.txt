@@ -1,0 +1,167 @@
+Mobile Version Plan — Android (StockTracker)
+=============================================
+
+ARCHITECTURE
+------------
+Flutter (Dart) — mobile frontend
+FastAPI (Python) — backend server, reusing all existing business logic
+
+Flutter handles the UI and navigation.
+FastAPI exposes the existing Python modules (alert_engine, data_fetcher,
+cache_manager, settings_manager) as HTTP endpoints.
+The mobile app communicates with the backend over a local or hosted API.
+
+
+WHY THIS SPLIT
+--------------
+- All existing backend code is reused unchanged
+- Flutter gives a polished, performant, native-feeling Android UI
+- Clean separation of concerns: UI in Dart, logic in Python
+- FastAPI is lightweight, fast to set up, and well-documented
+- Easily extended to iOS and web later with no backend changes
+
+
+STEP 1 — Build the FastAPI backend
+------------------------------------
+Install FastAPI and Uvicorn:
+  pip install fastapi uvicorn
+
+Create a new file: server/main.py
+
+Expose the following endpoints, wrapping existing modules:
+
+  GET  /settings
+       Returns current settings.json (stocks, indicators, stock_thresholds)
+
+  POST /settings
+       Saves updated settings (add/remove stocks, indicators, thresholds)
+
+  POST /update
+       Runs run_alerts() from alert_engine.py, returns alerts + stats JSON
+       Supports streaming progress via Server-Sent Events (SSE) or polling
+
+  GET  /stock/search?q={query}
+       Calls yf.Search() and returns autocomplete suggestions
+
+  GET  /stock/info?ticker={ticker}
+       Returns yf.Ticker(ticker).info for the company info panel
+
+  GET  /stock/validate?ticker={ticker}
+       Checks if a ticker symbol is valid (used before adding to watchlist)
+
+  GET  /alerts
+       Returns the current alerts.json data
+
+All endpoints return JSON. The existing modules are imported and called
+directly — no logic is duplicated in the server.
+
+Run locally:
+  uvicorn server.main:app --host 0.0.0.0 --port 8000
+
+
+STEP 2 — Set up Flutter
+------------------------
+Install Flutter SDK: https://docs.flutter.dev/get-started/install/windows
+Install Android Studio for the Android emulator and SDK tools
+Run: flutter doctor  (resolve any missing dependencies)
+
+Create the Flutter project:
+  flutter create stock_tracker_mobile
+  cd stock_tracker_mobile
+
+Key packages to add (pubspec.yaml):
+  http: ^1.0.0              — API calls to FastAPI backend
+  provider: ^6.0.0          — state management
+  fl_chart: ^0.65.0         — charts for the Analysis screen
+  shared_preferences        — store backend URL / local preferences
+  flutter_local_notifications — price alert push notifications
+
+
+STEP 3 — Build Flutter screens
+--------------------------------
+Map each desktop page to a Flutter screen:
+
+  HomeScreen         — update button, last updated time, alert summary list
+  StocksScreen       — watchlist, company info panel, price alerts UI
+  AnalysisScreen     — candlestick/line chart, indicators, stats
+  IndicatorsScreen   — add/remove indicators with autocomplete
+
+Navigation: use a BottomNavigationBar with 4 tabs (mirrors the desktop nav).
+
+Each screen fetches data from the FastAPI endpoints using the http package.
+Use Provider or Riverpod for state (selected ticker, settings, alert results).
+
+UI notes:
+  - Dark theme matching the desktop: use ThemeData.dark() with custom colors
+  - Watchlist items: ListTile with swipe-to-delete (Dismissible widget)
+  - Autocomplete: use Flutter's built-in Autocomplete widget, backed by
+    the /stock/search endpoint
+  - Company info: a scrollable Column of Cards (mirrors the desktop grid)
+  - Price alerts: a separate route/bottom sheet, same data from /settings
+
+
+STEP 4 — Charts (Analysis screen)
+-----------------------------------
+Use the fl_chart package (LineChart or CandlestickChart).
+The backend /update endpoint already fetches and caches OHLCV data in SQLite.
+Add a new endpoint:
+
+  GET /stock/history?ticker={ticker}&period={period}
+      Returns OHLCV rows from cache_manager as JSON for Flutter to plot
+
+
+STEP 5 — Deployment options for the backend
+---------------------------------------------
+During development:
+  Run FastAPI on your PC, connect Android device/emulator to the same
+  network. Set the base URL in Flutter to http://<your-local-IP>:8000
+
+For a persistent/production setup (choose one):
+  A. Run on a home server or Raspberry Pi on your local network
+  B. Deploy to a cloud VM (e.g. AWS EC2 free tier, DigitalOcean $6/mo)
+     and expose over HTTPS — Flutter app connects from anywhere
+  C. Package backend + Flutter in a single Android app using Chaquopy
+     (runs Python inside the APK) — simpler distribution, no server needed
+     but more complex build setup
+
+
+STEP 6 — Push notifications for price alerts
+---------------------------------------------
+Use flutter_local_notifications for on-device alerts triggered after
+each /update call. If the backend is cloud-hosted, consider Firebase
+Cloud Messaging (FCM) for push notifications sent server-side.
+
+
+STEP 7 — Build and release the APK
+------------------------------------
+Connect an Android device with USB debugging, then:
+  flutter run                          — debug build on device
+  flutter build apk --release          — release APK
+  flutter build appbundle              — for Google Play Store submission
+
+Sign the release build with a keystore (flutter documentation covers this).
+
+
+RECOMMENDED BUILD ORDER
+------------------------
+1. Set up FastAPI server, verify all endpoints return correct JSON
+2. Set up Flutter project, confirm it can reach the FastAPI server
+3. Build HomeScreen — update trigger, show alert results
+4. Build StocksScreen — watchlist CRUD, company info, price alerts
+5. Build AnalysisScreen — chart + indicator stats
+6. Build IndicatorsScreen — add/remove indicators
+7. Add push notifications
+8. Decide on deployment (local vs cloud) and configure base URL
+9. Release APK
+
+
+KNOWN CHALLENGES
+-----------------
+- yfinance can be slow on mobile networks; show loading indicators and
+  handle timeouts gracefully in Flutter (use async/await + error states)
+- If backend is hosted remotely, secure the API (at minimum, a shared
+  secret key in request headers) so it is not publicly accessible
+- OHLCV history endpoint may return large JSON for long periods; consider
+  pagination or limiting to 3 months by default
+- Android requires INTERNET permission in AndroidManifest.xml (Flutter
+  adds this automatically when using the http package)

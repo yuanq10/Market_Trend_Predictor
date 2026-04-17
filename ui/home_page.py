@@ -10,7 +10,8 @@ from storage.settings_manager import load_settings, load_alerts, save_alerts
 from core.alert_engine import run_alerts
 import ui.theme as T
 
-INDICATOR_STAT_KEYS = {"CCI": "CCI", "MACD": "MACD", "KDJ K": "KDJ"}
+# Map indicator type → (stats-dict key, display label)
+_CHARTABLE = {"CCI": ("cci", "CCI"), "MACD": ("macd", "MACD"), "KDJ": ("kdj_k", "KDJ K")}
 
 
 class HomePage(ctk.CTkFrame):
@@ -24,6 +25,7 @@ class HomePage(ctk.CTkFrame):
         self._active_indicator = None
         self._alert_data = {}
         self._build_ui()
+        self._refresh_indicator_cards()
         self._load_saved_alerts()
 
     # ------------------------------------------------------------------
@@ -164,18 +166,14 @@ class HomePage(ctk.CTkFrame):
         ]:
             self._stat_labels[key] = self._make_metric_card(self._stats_inner, display)
 
-        ctk.CTkLabel(
-            self._stats_inner, text="INDICATORS",
-            font=ctk.CTkFont(size=9, weight="bold"), text_color=T.TEXT_DIM
-        ).pack(anchor="w", padx=4, pady=(10, 2))
+        self._ind_section_label = ctk.CTkLabel(
+            self._stats_inner, text="Indicators",
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT
+        )
+        self._ind_section_label.pack(anchor="w", padx=4, pady=(10, 2))
 
-        for stat_key, ind_type in INDICATOR_STAT_KEYS.items():
-            self._stat_labels[stat_key] = self._make_metric_card(
-                self._stats_inner, stat_key,
-                clickable=True,
-                click_cmd=lambda k=stat_key, t=ind_type: self._toggle_indicator_plot(k, t),
-                btn_store_key=stat_key,
-            )
+        self._ind_cards_frame = ctk.CTkFrame(self._stats_inner, fg_color="transparent")
+        self._ind_cards_frame.pack(fill="x")
 
     def _make_metric_card(self, parent, label, clickable=False, click_cmd=None, btn_store_key=None):
         card = ctk.CTkFrame(parent, fg_color=T.BG, corner_radius=6,
@@ -207,9 +205,42 @@ class HomePage(ctk.CTkFrame):
         return val_lbl
 
     # ------------------------------------------------------------------
+    # Dynamic indicator cards
+    # ------------------------------------------------------------------
+    def _refresh_indicator_cards(self):
+        from storage.settings_manager import load_settings as _ls
+        for w in self._ind_cards_frame.winfo_children():
+            w.destroy()
+        # Remove old indicator keys from stat_labels so stale labels aren't updated
+        for k in list(self._stat_labels.keys()):
+            if k not in ("Close", "Change % (1d)", "Volume"):
+                del self._stat_labels[k]
+        self._stat_key_btns = {}
+
+        settings = _ls()
+        enabled_types = {i["type"] for i in settings.get("indicators", []) if i.get("enabled", True)}
+        active_chartable = [(t, sk, lbl) for t, (sk, lbl) in _CHARTABLE.items() if t in enabled_types]
+
+        if not active_chartable:
+            ctk.CTkLabel(
+                self._ind_cards_frame, text="No active indicators",
+                font=ctk.CTkFont(size=10), text_color=T.TEXT_MUTED
+            ).pack(anchor="w", padx=4, pady=4)
+            return
+
+        for ind_type, stat_key, display_label in active_chartable:
+            self._stat_labels[display_label] = self._make_metric_card(
+                self._ind_cards_frame, display_label,
+                clickable=True,
+                click_cmd=lambda k=display_label, t=ind_type: self._toggle_indicator_plot(k, t),
+                btn_store_key=display_label,
+            )
+
+    # ------------------------------------------------------------------
     # Data loading
     # ------------------------------------------------------------------
     def on_show(self):
+        self._refresh_indicator_cards()
         self._load_saved_alerts()
 
     def _load_saved_alerts(self):
@@ -318,9 +349,9 @@ class HomePage(ctk.CTkFrame):
         self._stat_labels["Change % (1d)"].configure(text=fmt(change, "%"), text_color=color)
         vol = stats.get("volume")
         self._stat_labels["Volume"].configure(text=f"{vol:,}" if vol else "—")
-        self._stat_labels["CCI"].configure(text=fmt(stats.get("cci")))
-        self._stat_labels["MACD"].configure(text=fmt(stats.get("macd")))
-        self._stat_labels["KDJ K"].configure(text=fmt(stats.get("kdj_k")))
+        for _itype, (_sk, _lbl) in _CHARTABLE.items():
+            if _lbl in self._stat_labels:
+                self._stat_labels[_lbl].configure(text=fmt(stats.get(_sk)))
 
         threading.Thread(target=self._fetch_and_draw, args=(ticker,), daemon=True).start()
 
@@ -416,19 +447,22 @@ class HomePage(ctk.CTkFrame):
     def _plot_indicator(self, ax, df, indicator: str, ind_cfg: dict, fg: str, bg: str):
         from core.indicators import calc_cci, calc_macd, calc_kdj
 
+        thresholds_cfg = ind_cfg.get("thresholds", {})
+
+        def _draw_thresholds(th_dict):
+            seen = set()
+            for vals in th_dict.values():
+                for v in vals:
+                    if v not in seen:
+                        ax.axhline(v, color=T.WARNING, linestyle="--", linewidth=0.8, alpha=0.7)
+                        seen.add(v)
+
         if indicator == "CCI":
             period = ind_cfg.get("period", 20)
             cci = calc_cci(df, period).dropna()
             ax.plot(cci.index, cci.values, color=T.CHART_CCI, linewidth=1.4)
-            buy_th = ind_cfg.get("buy_threshold", -100)
-            sell_th = ind_cfg.get("sell_threshold", 100)
-            ax.axhline(buy_th,  color=T.SUCCESS, linestyle="--", linewidth=0.8, alpha=0.7)
-            ax.axhline(sell_th, color=T.DANGER,  linestyle="--", linewidth=0.8, alpha=0.7)
             ax.axhline(0, color=T.TEXT_DIM, linewidth=0.5, alpha=0.6)
-            ax.fill_between(cci.index, cci.values, buy_th,
-                            where=(cci.values < buy_th), alpha=0.2, color=T.SUCCESS, interpolate=True)
-            ax.fill_between(cci.index, cci.values, sell_th,
-                            where=(cci.values > sell_th), alpha=0.2, color=T.DANGER, interpolate=True)
+            _draw_thresholds(thresholds_cfg)
             ax.set_ylabel("CCI", color=T.TEXT_MUTED, fontsize=7)
 
         elif indicator == "MACD":
@@ -448,13 +482,8 @@ class HomePage(ctk.CTkFrame):
                 ax.bar(pos.index, pos.values, color=T.CHART_HIST_POS, alpha=0.5, width=0.8)
             if not neg.empty:
                 ax.bar(neg.index, neg.values, color=T.CHART_HIST_NEG, alpha=0.5, width=0.8)
-            buy_th  = ind_cfg.get("buy_threshold")
-            sell_th = ind_cfg.get("sell_threshold")
-            if buy_th  is not None and buy_th  != 0:
-                ax.axhline(buy_th,  color=T.SUCCESS, linestyle="--", linewidth=0.8, alpha=0.7)
-            if sell_th is not None and sell_th != 0:
-                ax.axhline(sell_th, color=T.DANGER,  linestyle="--", linewidth=0.8, alpha=0.7)
             ax.axhline(0, color=T.TEXT_DIM, linewidth=0.5, alpha=0.6)
+            _draw_thresholds(thresholds_cfg)
             ax.set_ylabel("MACD", color=T.TEXT_MUTED, fontsize=7)
             ax.legend(fontsize=6, facecolor=T.CARD, labelcolor=T.TEXT_MUTED,
                       loc="upper left", framealpha=0.8, edgecolor=T.BORDER)
@@ -470,10 +499,7 @@ class HomePage(ctk.CTkFrame):
             ax.plot(K.index, K.values, color=T.CHART_K, linewidth=1.2, label="K")
             ax.plot(D.index, D.values, color=T.CHART_D, linewidth=1.2, label="D")
             ax.plot(J.index, J.values, color=T.CHART_J, linewidth=1.2, label="J")
-            buy_th  = ind_cfg.get("buy_threshold", 20)
-            sell_th = ind_cfg.get("sell_threshold", 80)
-            ax.axhline(buy_th,  color=T.SUCCESS, linestyle="--", linewidth=0.8, alpha=0.7)
-            ax.axhline(sell_th, color=T.DANGER,  linestyle="--", linewidth=0.8, alpha=0.7)
+            _draw_thresholds(thresholds_cfg)
             ax.set_ylabel("KDJ", color=T.TEXT_MUTED, fontsize=7)
             ax.legend(fontsize=6, facecolor=T.CARD, labelcolor=T.TEXT_MUTED,
                       loc="upper left", framealpha=0.8, edgecolor=T.BORDER)
@@ -494,7 +520,7 @@ class HomePage(ctk.CTkFrame):
 
     def _run_update(self):
         try:
-            settings = load_settings()
+            settings   = load_settings()
             stocks     = settings.get("stocks", [])
             indicators = settings.get("indicators", [])
 
@@ -502,14 +528,46 @@ class HomePage(ctk.CTkFrame):
                 self.after(0, lambda: self._finish_update(None, "No stocks configured."))
                 return
 
+            # ── Prune stale cache data ────────────────────────────────
+            from storage.cache_manager import (
+                init_db, is_cache_fresh, last_trade_date,
+                prune_old_rows, prune_removed_tickers,
+            )
+            init_db()
+            prune_old_rows(days=90)
+            prune_removed_tickers(stocks)
+
+            # ── Cache freshness check ─────────────────────────────────
+            from datetime import datetime as _dt
+
+            alerts_data     = load_alerts()
+            last_updated    = alerts_data.get("last_updated", "")
+            cached_tickers  = set(alerts_data.get("stats", {}).keys())
+            current_tickers = set(stocks)
+
+            all_fresh      = all(is_cache_fresh(t) for t in stocks)
+            same_watchlist = current_tickers == cached_tickers
+
+            if all_fresh and same_watchlist and last_updated:
+                try:
+                    last_date = _dt.strptime(last_updated, "%Y-%m-%d %H:%M:%S").date()
+                    if last_date >= last_trade_date():
+                        self.after(0, lambda: self._finish_update(
+                            alerts_data, f"Already up to date  ({last_updated})"))
+                        return
+                except Exception:
+                    pass  # date parse failed — fall through to full update
+
+            # ── Full update ───────────────────────────────────────────
             def progress(ticker, i, total):
                 self.after(0, lambda: self._lbl_status.configure(
                     text=f"Fetching {ticker} ({i+1}/{total})..."))
 
-            result = run_alerts(stocks, indicators, on_progress=progress)
+            stock_thresholds = settings.get("stock_thresholds", {})
+            result = run_alerts(stocks, indicators,
+                                stock_thresholds=stock_thresholds,
+                                on_progress=progress)
             save_alerts(result)
-
-
             self.after(0, lambda: self._finish_update(result, "Done."))
         except Exception as e:
             self.after(0, lambda: self._finish_update(None, f"Error: {e}"))

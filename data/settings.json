@@ -1,34 +1,29 @@
 {
   "stocks": [
     "TSLA",
-    "AAPL",
-    "KO"
+    "KO",
+    "AAPL"
   ],
   "indicators": [
     {
-      "type": "CCI",
-      "enabled": true,
-      "period": 20,
-      "buy_threshold": -100.0,
-      "sell_threshold": 100.0
-    },
-    {
       "type": "MACD",
       "enabled": true,
-      "fast": 12,
-      "slow": 26,
-      "signal": 9,
+      "fastperiod": 12,
+      "slowperiod": 26,
+      "signalperiod": 9,
       "buy_threshold": 0.5,
       "sell_threshold": -0.5
     },
     {
-      "type": "KDJ",
+      "type": "CCI",
       "enabled": true,
-      "period": 9,
-      "k_smooth": 3,
-      "d_smooth": 3,
-      "buy_threshold": 20.0,
-      "sell_threshold": 80.0
+      "timeperiod": 14,
+      "thresholds": {
+        "CCI": []
+      }
     }
-  ]
+  ],
+  "stock_thresholds": {
+    "TSLA": []
+  }
 }

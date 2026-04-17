@@ -16,10 +16,11 @@ ALERTS_FILE = os.path.join(DATA_DIR, "alerts.json")
 
 DEFAULT_SETTINGS = {
     "stocks": [],
+    "stock_thresholds": {},
     "indicators": [
-        {"type": "CCI", "enabled": True, "period": 20, "buy_threshold": -100, "sell_threshold": 100},
-        {"type": "MACD", "enabled": True, "fast": 12, "slow": 26, "signal": 9},
-        {"type": "KDJ", "enabled": True, "period": 9, "k_smooth": 3, "d_smooth": 3, "buy_threshold": 20, "sell_threshold": 80}
+        {"type": "CCI",  "enabled": True, "period": 20, "thresholds": {}},
+        {"type": "MACD", "enabled": True, "fast": 12, "slow": 26, "signal": 9, "thresholds": {}},
+        {"type": "KDJ",  "enabled": True, "period": 9, "k_smooth": 3, "d_smooth": 3, "thresholds": {}}
     ]
 }
 
@@ -41,11 +42,6 @@ def load_settings() -> dict:
         return DEFAULT_SETTINGS.copy()
     with open(SETTINGS_FILE, "r") as f:
         data = json.load(f)
-    # Ensure all indicator defaults are present
-    saved_types = {ind["type"] for ind in data.get("indicators", [])}
-    for default_ind in DEFAULT_SETTINGS["indicators"]:
-        if default_ind["type"] not in saved_types:
-            data.setdefault("indicators", []).append(default_ind.copy())
     return data
 
 

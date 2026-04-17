@@ -1,0 +1,16 @@
+{
+  "alerts": {
+    "AAPL": []
+  },
+  "stats": {
+    "AAPL": {
+      "close": 272.04,
+      "change_pct": 3.28,
+      "volume": 23954192,
+      "cci": 162.12,
+      "macd": 2.3771,
+      "kdj_k": 93.1
+    }
+  },
+  "last_updated": "2026-04-17 11:30:47"
+}
